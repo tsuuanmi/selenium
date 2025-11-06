@@ -146,6 +146,13 @@ time.sleep(5)
 for product_id in product_ids:
     logger.info(f"Searching for ID: {product_id}")
     
+    # Check if PDF already exists in download folder
+    download_path = Path(DOWNLOAD_FOLDER)
+    existing_files = list(download_path.glob(f"{product_id}.*"))
+    if existing_files:
+        logger.info(f"File for {product_id} already exists, skipping download: {existing_files[0].name}")
+        continue
+    
     # Find and fill the "Số đầu dòng sản phẩm" input field
     id_field = WebDriverWait(driver, 10).until(
         EC.presence_of_element_located((By.XPATH, "//input[contains(@placeholder, 'Nhập số đầu dòng…')]"))

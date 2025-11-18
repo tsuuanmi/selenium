@@ -17,11 +17,11 @@ EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 
 # Download folder configuration
-DOWNLOAD_FOLDER = "results/PDF"
+DOWNLOAD_DIR = "/mnt/bca/mtDNA/science/temp"
 LIST = "data/list.txt"
 
-os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
-logger.info(f"Download folder: {DOWNLOAD_FOLDER}")
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+logger.info(f"Base download folder: {DOWNLOAD_DIR}")
 
 # Load product IDs from list.txt file
 with open(LIST, "r") as f:
@@ -32,55 +32,52 @@ logger.info(f"Loaded {len(product_ids)} product IDs from {LIST}")
 # Set up Chrome options for automatic downloads
 chrome_options = Options()
 chrome_options.add_experimental_option("prefs", {
-    "download.default_directory": DOWNLOAD_FOLDER,
+    "download.default_directory": DOWNLOAD_DIR,
     "download.prompt_for_download": False,
     "download.directory_upgrade": True,
     "safebrowsing.enabled": True
 })
 
-# Track files that have been processed to avoid renaming the same file twice
-processed_files = set()
-
-def wait_for_download_and_rename(download_folder: str, product_id: str, processed_files: set, timeout: int = 60) -> bool:
-    """Wait for download to complete and rename to product_id.
+def wait_for_download_and_rename(base_folder: str, product_id: str, timeout: int = 600) -> bool:
+    """Wait for download to complete and move to nested folder with product_id name.
     
     Args:
-        download_folder: Path to the download directory.
-        product_id: Product ID to use for renaming.
-        processed_files: Set of file paths that have already been processed.
+        base_folder: Path to the base download directory.
+        product_id: Product ID to use for creating nested folder and renaming.
         timeout: Maximum time to wait for download in seconds.
     
     Returns:
         True if download and rename succeeded, False otherwise.
     """
-    download_path = Path(download_folder)
+    base_path = Path(base_folder)
+    product_folder = base_path / product_id
+    product_folder.mkdir(parents=True, exist_ok=True)
+    
     start_time = time.time()
+    initial_files = set(f.name for f in base_path.glob("*") if f.is_file())
     
     # Wait for download to complete
     while time.time() - start_time < timeout:
         # Get all completed files (not currently downloading)
-        files = [f for f in download_path.glob("*") if f.is_file() and not f.name.endswith('.crdownload')]
+        current_files = [f for f in base_path.glob("*") if f.is_file() and not f.name.endswith('.crdownload')]
         
-        # Find new files that haven't been processed yet
-        new_files = [f for f in files if str(f) not in processed_files and not f.stem == product_id]
+        # Find new files that weren't there initially
+        new_files = [f for f in current_files if f.name not in initial_files]
         
         if new_files:
             # Get the most recently modified new file
             latest_file = max(new_files, key=lambda x: x.stat().st_mtime)
             extension = latest_file.suffix
-            new_path = download_path / f"{product_id}{extension}"
+            new_path = product_folder / f"{product_id}{extension}"
             
             # Remove existing file with same name if it exists
             if new_path.exists():
                 new_path.unlink()
             
-            # Rename the file
+            # Move the file to nested folder
             latest_file.rename(new_path)
             
-            # Mark this file as processed
-            processed_files.add(str(new_path))
-            
-            logger.success(f"Renamed to: {product_id}{extension}")
+            logger.success(f"Moved to: {product_id}/{product_id}{extension}")
             return True
         
         time.sleep(1)
@@ -105,7 +102,7 @@ password = WebDriverWait(driver, 10).until(
 )
 password.send_keys(PASSWORD)
 
-time.sleep(10)
+time.sleep(5)
 
 # Submit login
 submit_button = WebDriverWait(driver, 10).until(
@@ -146,12 +143,13 @@ time.sleep(5)
 for product_id in product_ids:
     logger.info(f"Searching for ID: {product_id}")
     
-    # Check if PDF already exists in download folder
-    download_path = Path(DOWNLOAD_FOLDER)
-    existing_files = list(download_path.glob(f"{product_id}.*"))
-    if existing_files:
-        logger.info(f"File for {product_id} already exists, skipping download: {existing_files[0].name}")
-        continue
+    # Check if PDF already exists in nested folder
+    product_folder = Path(DOWNLOAD_DIR) / product_id
+    if product_folder.exists():
+        existing_files = list(product_folder.glob(f"{product_id}.*"))
+        if existing_files:
+            logger.info(f"File for {product_id} already exists, skipping download: {existing_files[0].name}")
+            continue
     
     # Find and fill the "Số đầu dòng sản phẩm" input field
     id_field = WebDriverWait(driver, 10).until(
@@ -172,7 +170,7 @@ for product_id in product_ids:
     search_button.click()
     
     # Wait as per instructions
-    time.sleep(10)
+    time.sleep(5)
     
     # Find and click the PDF link
     try:
@@ -188,11 +186,11 @@ for product_id in product_ids:
         checkbox.click()
         
         # Wait as per instructions
-        time.sleep(10)
+        time.sleep(5)
 
-        # Click the "Tải xuống đã chọn (N)" button robustly
-        download_button = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'btn') and contains(., 'Tải xuống đã chọn')]"))
+        # Click the "Tải xuống đã chọn (N)" button robustly
+        download_button = WebDriverWait(driver, 15).until(
+            EC.element_to_be_clickable((By.XPATH, "//button[contains(@class,'btn') and starts-with(normalize-space(),'Tải xuống')]"))
         )
 
         # Scroll the button into view to avoid interception
@@ -202,10 +200,12 @@ for product_id in product_ids:
         download_button.click()
 
         # Wait as per instructions
-        time.sleep(15)
+        time.sleep(5)
         
+        logger.debug('Clicked download button, waiting for continue button...')
+
         # Click "TIẾP TỤC" in the popup robustly
-        continue_button = WebDriverWait(driver, 10).until(
+        continue_button = WebDriverWait(driver, 60).until(
             EC.element_to_be_clickable((By.XPATH, "//a[contains(@class, 'btn') and contains(., 'TIẾP TỤC')]"))
         )
 
@@ -215,9 +215,9 @@ for product_id in product_ids:
         
         continue_button.click()
         
-        # Wait for download to complete and rename file
-        if wait_for_download_and_rename(DOWNLOAD_FOLDER, product_id, processed_files, timeout=60):
-            logger.success(f"Successfully downloaded and renamed file for {product_id}")
+        # Wait for download to complete and move to nested folder
+        if wait_for_download_and_rename(DOWNLOAD_DIR, product_id, timeout=600):
+            logger.success(f"Successfully downloaded and moved file for {product_id}")
         else:
             logger.warning(f"Download may have failed for {product_id}")
         

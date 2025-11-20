@@ -2,10 +2,12 @@ import time
 import os
 from pathlib import Path
 from loguru import logger
+from webdriver_manager.chrome import ChromeDriverManager
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.chrome.options import Options
 from dotenv import load_dotenv
 
@@ -17,7 +19,7 @@ EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 
 # Download folder configuration
-DOWNLOAD_DIR = "/mnt/bca/mtDNA/science/temp"
+DOWNLOAD_DIR = "temp"
 LIST = "data/list.txt"
 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
@@ -29,8 +31,15 @@ with open(LIST, "r") as f:
 
 logger.info(f"Loaded {len(product_ids)} product IDs from {LIST}")
 
-# Set up Chrome options for automatic downloads
 chrome_options = Options()
+chrome_options.add_argument("--headless=new")
+chrome_options.add_argument("--no-sandbox")
+chrome_options.add_argument("--disable-setuid-sandbox")
+chrome_options.add_argument("--disable-dev-shm-usage")
+chrome_options.add_argument("--disable-gpu")
+chrome_options.add_argument("--remote-debugging-port=9222")
+chrome_options.add_argument("--disable-extensions")
+
 chrome_options.add_experimental_option("prefs", {
     "download.default_directory": DOWNLOAD_DIR,
     "download.prompt_for_download": False,
@@ -86,8 +95,10 @@ def wait_for_download_and_rename(base_folder: str, product_id: str, timeout: int
     return False
 
 # Set up WebDriver
-driver = webdriver.Chrome(options=chrome_options)
-
+driver = webdriver.Chrome(
+    service=ChromeService(ChromeDriverManager().install()),
+    options=chrome_options
+)
 # Navigate to login page
 driver.get("https://labcentral.corelaboratory.abbott/int/en/home.html")
 
